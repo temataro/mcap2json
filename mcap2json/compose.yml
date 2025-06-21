@@ -1,0 +1,13 @@
+version: '3'
+services:
+  mcap2json:
+    build: .
+    image: meriac/mcap2json:0.1
+    container_name: mcap2json
+    hostname: mcap2json
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./workspace:/workspace
+    working_dir: /workspace
+    command: /bin/bash

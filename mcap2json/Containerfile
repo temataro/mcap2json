@@ -1,0 +1,18 @@
+FROM docker.io/library/ros:jazzy-ros-core
+
+# Install ros2 dpendencies
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    ros-jazzy-rosbag2-py \
+    ros-jazzy-rosbag2 \
+    ros-jazzy-rosbag2-storage-mcap \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Install Python packages globally as root
+RUN pip install --break-system-packages --no-cache-dir \
+    mcap mcap-ros2-support \
+    tqdm \
+    && rm -rf /root/.cache/pip
+
+WORKDIR /workspace
