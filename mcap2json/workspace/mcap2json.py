@@ -332,7 +332,7 @@ def serialize_message(obj):
         return str(obj)
 
 
-def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics=None, pretty=False):
+def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics=None, pretty=False, limit=None):
     """Read MCAP file and output each message as JSON object per line.
 
     Args:
@@ -341,11 +341,13 @@ def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics
         show_progress: Whether to show progress bar
         topics: Optional list of topics to include (None means include all)
         pretty: Whether to pretty-print JSON output
+        limit: Optional limit on number of JSON objects to output
     """
     try:
         message_count = 0
         decoded_count = 0
         raw_count = 0
+        output_count = 0
 
         # Open output file if specified, otherwise use stdout
         if output_file:
@@ -380,7 +382,9 @@ def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics
                 # Create iterator with progress bar if available and requested
                 message_iterator = reader.iter_messages()
                 if show_progress and TQDM_AVAILABLE and total_messages:
-                    message_iterator = tqdm(message_iterator, total=total_messages,
+                    # Adjust progress bar total if limit is specified
+                    progress_total = min(total_messages, limit) if limit else total_messages
+                    message_iterator = tqdm(message_iterator, total=progress_total,
                                           desc="Converting", unit=" msgs", file=sys.stderr)
 
                 # Iterate through messages
@@ -463,9 +467,17 @@ def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics
 
                     # Output JSON (pretty-printed or single line)
                     print(json.dumps(json_obj, indent=2 if pretty else None), file=output)
+                    output_count += 1
+
+                    # Check if we've reached the limit
+                    if limit and output_count >= limit:
+                        break
 
             # Print summary
-            print(f"# Processed {message_count} messages: {decoded_count} decoded, {raw_count} raw", file=sys.stderr)
+            summary_msg = f"# Processed {message_count} messages: {decoded_count} decoded, {raw_count} raw"
+            if limit and output_count < message_count:
+                summary_msg += f" (output limited to {output_count} messages)"
+            print(summary_msg, file=sys.stderr)
 
         finally:
             # Close output file if it was opened
@@ -492,6 +504,7 @@ def main():
     parser.add_argument("-p", "--pretty", action="store_true", help="Pretty-print JSON output (indented format)")
     parser.add_argument("-t", "--topics", action="store_true", help="List all topics with their types and message counts, then exit")
     parser.add_argument("-i", "--idl", action="store_true", help="List IDL definitions of all types contained (or specific topics with subdependencies if provided)")
+    parser.add_argument("-l", "--limit", type=int, help="Limit output to N JSON objects")
     parser.add_argument("topics_filter", nargs="*", help="Topics to include in output (if not specified, all topics are included)")
     args = parser.parse_args()
 
@@ -513,7 +526,7 @@ def main():
     topics_set = set(args.topics_filter) if args.topics_filter else None
 
     # Convert all log entries to JSON
-    convert_mcap_to_json(args.mcap, args.json_file, show_progress=not args.no_progress, topics=topics_set, pretty=args.pretty)
+    convert_mcap_to_json(args.mcap, args.json_file, show_progress=not args.no_progress, topics=topics_set, pretty=args.pretty, limit=args.limit)
 
 
 if __name__ == "__main__":
