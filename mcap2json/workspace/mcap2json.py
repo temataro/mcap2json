@@ -27,6 +27,8 @@ import json
 import sys
 import base64
 import bz2
+import os
+import glob
 from mcap import reader as mcap_reader
 from mcap_ros2.decoder import DecoderFactory
 from collections import defaultdict
@@ -571,12 +573,49 @@ def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics
         sys.exit(1)
 
 
+def process_directory(directory_path, args):
+    """Process all MCAP files in a directory recursively.
+
+    Args:
+        directory_path: Path to directory containing MCAP files
+        args: Command line arguments
+    """
+    # Find all MCAP files in the directory recursively
+    mcap_files = glob.glob(os.path.join(directory_path, '**', '*.mcap'), recursive=True)
+
+    if not mcap_files:
+        print(f"Error: No MCAP files found in directory '{directory_path}' (searched recursively)", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"# Found {len(mcap_files)} MCAP files in directory (recursive search)", file=sys.stderr)
+
+    # Process each MCAP file
+    for i, mcap_file in enumerate(sorted(mcap_files), 1):
+        # Generate output filename: basename.json.bz2 in current directory
+        basename = os.path.basename(mcap_file)
+        output_file = os.path.splitext(basename)[0] + '.json.bz2'
+
+        # Show relative path for better context in recursive mode
+        rel_path = os.path.relpath(mcap_file, directory_path)
+
+        print(f"\n# [{i}/{len(mcap_files)}] Processing: {rel_path} -> {output_file}", file=sys.stderr)
+
+        # Convert topics list to set for faster lookup if provided
+        topics_set = set(args.topics_filter) if args.topics_filter else None
+
+        # Convert the file
+        convert_mcap_to_json(mcap_file, output_file, show_progress=not args.no_progress,
+                            topics=topics_set, pretty=args.pretty, limit=args.limit)
+
+    print(f"\n# Completed processing {len(mcap_files)} files", file=sys.stderr)
+
+
 def main():
 
     # Process command line settings
     parser = argparse.ArgumentParser(description="Convert ROS2 MCAP rosbag to JSON format (one object per line)")
-    parser.add_argument("-m", "--mcap", required=True, help="Path to the MCAP file to convert")
-    parser.add_argument("-o", "--output", dest="json_file", help="Path to output JSON file (defaults to stdout if not specified). If filename ends with .bz2, output will be compressed with bzip2")
+    parser.add_argument("-m", "--mcap", required=True, help="Path to the MCAP file or directory containing MCAP files to convert")
+    parser.add_argument("-o", "--output", dest="json_file", help="Path to output JSON file (defaults to stdout if not specified). If filename ends with .bz2, output will be compressed with bzip2. When processing a directory, this option is ignored and files are saved as basename.json.bz2")
     parser.add_argument("-q", "--no-progress", action="store_true", help="Disable progress bar (quiet mode)")
     parser.add_argument("-p", "--pretty", action="store_true", help="Pretty-print JSON output (indented format)")
     parser.add_argument("-t", "--topics", action="store_true", help="List all topics with their types and message counts, then exit")
@@ -589,22 +628,28 @@ def main():
     if not args.no_progress and not TQDM_AVAILABLE:
         print("# Warning: tqdm not installed. Install with 'pip install tqdm' for progress bar.", file=sys.stderr)
 
-    # If topics listing is requested, list topics and exit
-    if args.topics:
-        list_topics(args.mcap, show_progress=not args.no_progress)
-        sys.exit(0)
+    # Check if input is a directory
+    if os.path.isdir(args.mcap):
+        # Directory mode - process all MCAP files
+        process_directory(args.mcap, args)
 
-    # If IDL definitions are requested, list them and exit
-    if args.idl:
-        list_idl_definitions(args.mcap, show_progress=not args.no_progress, specific_topics=args.topic_filter)
-        sys.exit(0)
+    else:
+        # Single file mode - existing behavior
+        # If topics listing is requested, list topics and exit
+        if args.topics:
+            list_topics(args.mcap, show_progress=not args.no_progress)
+            sys.exit(0)
 
-    # Convert topics list to set for faster lookup if provided
-    topics_set = set(args.topics_filter) if args.topics_filter else None
+        # If IDL definitions are requested, list them and exit
+        if args.idl:
+            list_idl_definitions(args.mcap, show_progress=not args.no_progress, specific_topics=args.topics_filter)
+            sys.exit(0)
 
-    # Convert all log entries to JSON
-    convert_mcap_to_json(args.mcap, args.json_file, show_progress=not args.no_progress, topics=topics_set, pretty=args.pretty, limit=args.limit)
+        # Convert topics list to set for faster lookup if provided
+        topics_set = set(args.topics_filter) if args.topics_filter else None
 
+        # Convert all log entries to JSON
+        convert_mcap_to_json(args.mcap, args.json_file, show_progress=not args.no_progress, topics=topics_set, pretty=args.pretty, limit=args.limit)
 
 if __name__ == "__main__":
     main()

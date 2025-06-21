@@ -38,10 +38,12 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  -m MCAP, --mcap MCAP  Path to the MCAP file to convert
+  -m MCAP, --mcap MCAP  Path to the MCAP file or directory containing MCAP files to convert
   -o JSON_FILE, --output JSON_FILE
                         Path to output JSON file (defaults to stdout if not specified). 
-                        If filename ends with .bz2, output will be compressed with bzip2
+                        If filename ends with .bz2, output will be compressed with bzip2.
+                        When processing a directory, this option is ignored and files
+                        are saved as basename.json.bz2
   -q, --no-progress     Disable progress bar (quiet mode)
   -p, --pretty          Pretty-print JSON output (indented format)
   -t, --topics          List all topics with their types and message counts, then exit
@@ -222,6 +224,30 @@ When using the limit option, the summary will indicate how many messages were ou
 ```
 # Processed 11426 messages: 11426 decoded, 0 raw (output limited to 100 messages)
 ```
+
+### Batch Processing Directory
+
+Process all MCAP files in a directory and output compressed JSON files to the current directory:
+
+```bash
+# Convert all MCAP files in the specified directory
+python3 mcap2json.py -m /path/to/mcap/directory/
+
+# Each file.mcap will be converted to file.json.bz2 in the current directory
+# Output shows progress for each file:
+# Found 5 MCAP files in directory
+# [1/5] Processing: recording1.mcap -> recording1.json.bz2
+# [2/5] Processing: recording2.mcap -> recording2.json.bz2
+# ...
+
+# With topic filtering - applies to all files
+python3 mcap2json.py -m /path/to/mcap/directory/ /scan /odometry
+
+# Disable progress bar for batch processing
+python3 mcap2json.py -m /path/to/mcap/directory/ -q
+```
+
+Note: When processing a directory, the `-o/--output` option is ignored. Each MCAP file is automatically converted to a `.json.bz2` file with the same base name in the current working directory.
 
 ## Output Format
 
