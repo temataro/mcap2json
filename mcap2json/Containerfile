@@ -15,4 +15,7 @@ RUN pip install --break-system-packages --no-cache-dir \
     tqdm \
     && rm -rf /root/.cache/pip
 
+# Make sure mcap2json in  installed in the target image
+COPY --chmod=755 workspace/mcap2json.py /usr/local/bin/mcap2json
+
 WORKDIR /workspace

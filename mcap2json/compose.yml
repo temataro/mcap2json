@@ -2,7 +2,7 @@ version: '3'
 services:
   mcap2json:
     build: .
-    image: meriac/mcap2json:0.1
+    image: mcap2json
     container_name: mcap2json
     hostname: mcap2json
     stdin_open: true

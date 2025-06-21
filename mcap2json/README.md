@@ -26,6 +26,60 @@ The primary motivation for this tool is to **decouple data processing from the R
 - **IDL Inspection**: View IDL definitions for message types
 - **Output Limiting**: Sample large files by limiting the number of output messages
 
+### Build
+
+This tool can be built and run using either Docker or Podman. **Podman is preferred** as it's:
+- Available license-free and open source
+- Daemonless architecture (more secure)
+- Rootless containers by default
+- Drop-in Docker replacement with compatible CLI
+
+**Note:** Docker and Podman commands are interchangeable. Simply replace `podman` with `docker` in any command below if using Docker.
+
+#### Building the Container
+
+```bash
+# Build using podman-compose (recommended)
+podman compose build --no-cache
+# --no-cache: Forces rebuild from scratch, ignoring cached layers
+# Reads compose.yml which defines the build context and image name
+```
+#### Build the Container
+
+```bash
+# Start interactive session
+podman compose run --rm mcap2json
+# compose run: Runs a one-off command in a service
+# --rm: Remove container after exit
+# mcap2json: Service name from compose.yml
+
+# Run with custom command
+podman compose run --rm mcap2json mcap2json -m input.mcap -t
+# Runs the mcap2json tool with -t flag to list topics
+```
+
+#### Running the Container
+
+```bash
+# Interactive mode - opens bash shell in container
+podman run -it --rm -v $(pwd):/workspace mcap2json
+# -i: Keep STDIN open (interactive)
+# -t: Allocate pseudo-TTY (terminal)
+# --rm: Remove container after exit (cleanup)
+# -v $(pwd):/workspace: Mount current directory to /workspace in container
+# mcap2json: Image name to run
+
+# Direct conversion example
+podman run --rm -v $(pwd):/workspace mcap2json \
+  mcap2json -m /workspace/input.mcap -o /workspace/output.json.bz2
+# Runs mcap2json command directly without entering bash
+
+# Process entire directory
+podman run --rm -v /path/to/mcap/files:/workspace mcap2json \
+  mcap2json -m /workspace/
+# Processes all .mcap files recursively in the mounted directory
+```
+
 ### Command-Line Options
 
 ```
