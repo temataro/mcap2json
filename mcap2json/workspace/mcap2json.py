@@ -96,10 +96,37 @@ def parse_idl_type(idl_text, type_name):
     return fields
 
 
-def decode_cdr_message(data, fields, idl_text=None):
+def decode_cdr_message(data, fields, idl_text=None, idl_cache=None):
     """Decode CDR message data using field information."""
     result = {}
     offset = 4  # Skip CDR header (4 bytes)
+
+    # Build a map of all struct definitions in the current IDL
+    struct_map = {}
+    if idl_text:
+        # Find all struct definitions in the IDL
+        struct_pattern = r'struct\s+(\w+)\s*\{([^{}]+(?:\{[^{}]*\}[^{}]*)*)\}'
+        for match in re.finditer(struct_pattern, idl_text, re.DOTALL):
+            struct_name = match.group(1)
+            struct_body = match.group(2)
+            # Parse the fields of this struct
+            field_pattern = r'((?:\w+::)*\w+(?:\[\d*\])?)\s+(\w+)(?:\s*=\s*[^;]+)?;'
+            struct_fields = []
+            for field_match in re.finditer(field_pattern, struct_body):
+                field_type = field_match.group(1)
+                field_name = field_match.group(2)
+                # Clean up type names
+                field_type = field_type.replace('::', '_')
+                field_type = field_type.replace('[]', '_array')
+                # Map common ROS2 types
+                type_mapping = {
+                    'std_msgs_Header': 'Header',
+                    'builtin_interfaces_Time': 'Time',
+                    'octet': 'uint8',
+                }
+                field_type = type_mapping.get(field_type, field_type)
+                struct_fields.append((field_type, field_name))
+            struct_map[struct_name] = struct_fields
 
     for field_type, field_name in fields:
         if offset >= len(data):
@@ -139,18 +166,62 @@ def decode_cdr_message(data, fields, idl_text=None):
                 offset += length
                 value = header
             else:
-                # Try to parse as a nested struct if IDL is available
-                if idl_text:
-                    nested_fields = parse_idl_type(idl_text, field_type)
-                    if nested_fields:
-                        # Recursively decode nested struct
-                        # Create a sub-buffer starting at current offset
-                        value = decode_cdr_message(data[offset-4:], nested_fields, idl_text)
-                        # Advance offset by the size of the nested struct (estimate)
-                        offset += 16  # This is a rough estimate
-                    else:
-                        value = f"<{field_type}>"
-                else:
+                # Try to find this type - first in current IDL, then in cache
+                decoded_nested = False
+
+                # First try to find the type in the struct map we built
+                nested_fields = None
+                if struct_map:
+                    # Check if any struct name matches the end of our field type
+                    # e.g., field_type="some_interfaces_msg_DeviceState" matches struct "DeviceState"
+                    for struct_name, struct_fields in struct_map.items():
+                        if field_type.endswith(struct_name) or field_type == struct_name:
+                            nested_fields = struct_fields
+                            break
+
+                if nested_fields:
+                        # Found in current IDL
+                        try:
+                            # Don't align if we don't have enough data
+                            if offset + 4 <= len(data):
+                                offset = (offset + 3) & ~3
+                            remaining_data = data[offset:]
+                            nested_result = {}
+                            nested_offset = 0
+
+                            for nfield_type, nfield_name in nested_fields:
+                                if nested_offset >= len(remaining_data):
+                                    break
+                                try:
+                                    if nfield_type in CDR_TYPE_DECODERS:
+                                        decoder = CDR_TYPE_DECODERS[nfield_type]
+                                        nested_offset = (nested_offset + decoder["align"] - 1) & ~(decoder["align"] - 1)
+                                        if nested_offset + decoder["size"] <= len(remaining_data):
+                                            nested_result[nfield_name] = struct.unpack_from(decoder["format"], remaining_data, nested_offset)[0]
+                                            nested_offset += decoder["size"]
+                                    elif nfield_type == "string":
+                                        # Handle string in nested struct
+                                        nested_offset = (nested_offset + 3) & ~3
+                                        if nested_offset + 4 <= len(remaining_data):
+                                            str_len = struct.unpack_from('<I', remaining_data, nested_offset)[0]
+                                            nested_offset += 4
+                                            if nested_offset + str_len <= len(remaining_data):
+                                                nested_result[nfield_name] = remaining_data[nested_offset:nested_offset + str_len].decode('utf-8', errors='replace')
+                                                nested_offset += str_len
+                                    else:
+                                        # Could be another nested type - for now mark as unknown
+                                        nested_result[nfield_name] = f"<{nfield_type}>"
+                                except Exception as e:
+                                    nested_result[nfield_name] = f"<error: {str(e)}>"
+
+                            if nested_result:
+                                value = nested_result
+                                offset += nested_offset
+                                decoded_nested = True
+                        except:
+                            pass
+
+                if not decoded_nested:
                     value = f"<{field_type}>"
 
             result[field_name] = value
@@ -379,6 +450,12 @@ def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics
                 # IDL schema cache for custom messages
                 idl_cache = {}
 
+                # Pre-populate IDL cache with all available schemas
+                if summary and hasattr(summary, 'schemas'):
+                    for schema_id, schema in summary.schemas.items():
+                        if schema.encoding == "ros2idl":
+                            idl_cache[schema_id] = schema
+
                 # Create iterator with progress bar if available and requested
                 message_iterator = reader.iter_messages()
                 if show_progress and TQDM_AVAILABLE and total_messages:
@@ -444,7 +521,7 @@ def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics
                                 idl_text = schema.data.decode('utf-8')
                                 fields = parse_idl_type(idl_text, schema.name)
                                 if fields:
-                                    decoded_data = decode_cdr_message(message.data, fields, idl_text)
+                                    decoded_data = decode_cdr_message(message.data, fields, idl_text, idl_cache)
                                     if decoded_data:
                                         json_obj["data"] = decoded_data
                                         decoded = True
