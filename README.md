@@ -22,16 +22,19 @@ The primary motivation for this tool is to **decouple data processing from the R
 - **Message Decoding**: Automatically decodes standard ROS2 messages (geometry_msgs, sensor_msgs, etc.)
 - **Fallback Support**: Outputs raw base64-encoded data for custom messages that cannot be decoded
 - **Schema Information**: Preserves message type and encoding information for all messages
+- **Topic Listing**: Quick overview of all topics with their types and message counts
+- **IDL Inspection**: View IDL definitions for message types
+- **Output Limiting**: Sample large files by limiting the number of output messages
 
 ### Command-Line Options
 
 ```
-usage: mcap2json.py [-h] -m MCAP [-o JSON_FILE] [-q] [-p] [-l] [topics ...]
+usage: mcap2json.py [-h] -m MCAP [-o JSON_FILE] [-q] [-p] [-t] [-i] [-l LIMIT] [topics_filter ...]
 
 Convert ROS2 MCAP rosbag to JSON format (one object per line)
 
 positional arguments:
-  topics                Topics to include in output (if not specified, all topics are included)
+  topics_filter         Topics to include in output (if not specified, all topics are included)
 
 options:
   -h, --help            show this help message and exit
@@ -41,7 +44,10 @@ options:
                         If filename ends with .bz2, output will be compressed with bzip2
   -q, --no-progress     Disable progress bar (quiet mode)
   -p, --pretty          Pretty-print JSON output (indented format)
-  -l, --list-topics     List all topics with their types and message counts, then exit
+  -t, --topics          List all topics with their types and message counts, then exit
+  -i, --idl             List IDL definitions of all types contained (or specific topics if provided)
+  -l LIMIT, --limit LIMIT
+                        Limit output to N JSON objects
 ```
 
 ### Performance Tips
@@ -139,7 +145,7 @@ python3 mcap2json.py -m input.mcap -o output.json -p
 List all topics in the MCAP file with their types and message counts:
 
 ```bash
-python3 mcap2json.py -m input.mcap -l
+python3 mcap2json.py -m input.mcap -t
 ```
 
 Example output:
@@ -152,6 +158,69 @@ Topic                                              Type                         
 /tf                                                tf2_msgs/msg/TFMessage                               6096
 ----------------------------------------------------------------------------------------------------------------
 Total                                                                                                  11426
+```
+
+### List IDL Definitions
+
+List IDL definitions for all message types in the file:
+
+```bash
+python3 mcap2json.py -m input.mcap -i
+```
+
+List IDL definitions only for specific topics:
+
+```bash
+python3 mcap2json.py -m input.mcap -i /scan /odometry
+```
+
+Example output:
+```
+================================================================================
+Message Type: sensor_msgs/msg/LaserScan
+Schema ID: 1
+Used in topics: /scan
+--------------------------------------------------------------------------------
+module sensor_msgs {
+  module msg {
+    struct LaserScan {
+      std_msgs::msg::Header header;
+      float angle_min;
+      float angle_max;
+      float angle_increment;
+      float time_increment;
+      float scan_time;
+      float range_min;
+      float range_max;
+      sequence<float> ranges;
+      sequence<float> intensities;
+    };
+  };
+};
+================================================================================
+```
+
+### Limit Output
+
+Limit the number of JSON objects in the output (useful for previewing large files):
+
+```bash
+# Output only the first 100 messages
+python3 mcap2json.py -m input.mcap -l 100
+
+# Output first 50 messages to a file
+python3 mcap2json.py -m input.mcap -o preview.json -l 50
+
+# Combine with topic filtering - first 20 laser scans
+python3 mcap2json.py -m input.mcap -l 20 /scan
+
+# Limit with compressed output
+python3 mcap2json.py -m input.mcap -o sample.json.bz2 -l 1000
+```
+
+When using the limit option, the summary will indicate how many messages were output:
+```
+# Processed 11426 messages: 11426 decoded, 0 raw (output limited to 100 messages)
 ```
 
 ## Output Format
