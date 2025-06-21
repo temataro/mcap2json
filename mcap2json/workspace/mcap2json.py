@@ -215,6 +215,86 @@ def list_topics(mcap_file, show_progress=True):
         sys.exit(1)
 
 
+
+def list_idl_definitions(mcap_file, show_progress=True, specific_topics=None):
+    """List IDL definitions for all types or specific topics."""
+    try:
+        with open(mcap_file, "rb") as f:
+            # Create decoder factory
+            decoder_factory = DecoderFactory()
+            reader = mcap_reader.make_reader(f, decoder_factories=[decoder_factory])
+
+            # Get summary
+            summary = reader.get_summary()
+            if summary and summary.statistics:
+                total_messages = summary.statistics.message_count
+                print(f"# MCAP file contains {total_messages} messages\n", file=sys.stderr)
+
+            # Collect IDL schemas and map topics
+            idl_schemas = {}
+            schema_to_topics = {}
+            topic_to_schema = {}
+
+            # Get schemas from summary
+            if summary and hasattr(summary, 'schemas'):
+                for schema_id, schema in summary.schemas.items():
+                    if schema.encoding == "ros2idl":
+                        idl_schemas[schema_id] = schema
+                        schema_to_topics[schema_id] = set()
+
+            # Map topics to schemas
+            if summary and hasattr(summary, 'channels'):
+                for channel_id, channel in summary.channels.items():
+                    if channel.topic and channel.schema_id in idl_schemas:
+                        schema_to_topics[channel.schema_id].add(channel.topic)
+                        topic_to_schema[channel.topic] = channel.schema_id
+
+            # Filter schemas if specific topics requested
+            if specific_topics:
+                filtered_schemas = {}
+                for topic in specific_topics:
+                    if topic in topic_to_schema:
+                        schema_id = topic_to_schema[topic]
+                        if schema_id in idl_schemas:
+                            filtered_schemas[schema_id] = idl_schemas[schema_id]
+                schemas_to_display = filtered_schemas
+            else:
+                schemas_to_display = idl_schemas
+
+            # Display the IDL definitions
+            if schemas_to_display:
+                print("=" * 80)
+                for schema_id in sorted(schemas_to_display.keys()):
+                    schema = schemas_to_display[schema_id]
+                    topics = schema_to_topics.get(schema_id, set())
+
+                    print(f"Message Type: {schema.name}")
+                    print(f"Schema ID: {schema_id}")
+                    if topics:
+                        print(f"Used in topics: {', '.join(sorted(topics))}")
+                    print("-" * 80)
+
+                    # Decode and display IDL
+                    idl_text = schema.data.decode('utf-8')
+                    print(idl_text)
+                    print("=" * 80)
+                    print()
+            else:
+                print("No IDL schemas found", end="")
+                if specific_topics:
+                    print(f" for topics: {', '.join(specific_topics)}", end="")
+                print(".")
+
+    except FileNotFoundError:
+        print(f"Error: File '{mcap_file}' not found.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error reading MCAP file: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
 def serialize_message(obj):
     """Recursively serialize ROS message to JSON-compatible dictionary."""
     if obj is None:
@@ -410,21 +490,27 @@ def main():
     parser.add_argument("-o", "--output", dest="json_file", help="Path to output JSON file (defaults to stdout if not specified). If filename ends with .bz2, output will be compressed with bzip2")
     parser.add_argument("-q", "--no-progress", action="store_true", help="Disable progress bar (quiet mode)")
     parser.add_argument("-p", "--pretty", action="store_true", help="Pretty-print JSON output (indented format)")
-    parser.add_argument("-l", "--list-topics", action="store_true", help="List all topics with their types and message counts, then exit")
-    parser.add_argument("topics", nargs="*", help="Topics to include in output (if not specified, all topics are included)")
+    parser.add_argument("-t", "--topics", action="store_true", help="List all topics with their types and message counts, then exit")
+    parser.add_argument("-i", "--idl", action="store_true", help="List IDL definitions of all types contained (or specific topics with subdependencies if provided)")
+    parser.add_argument("topics_filter", nargs="*", help="Topics to include in output (if not specified, all topics are included)")
     args = parser.parse_args()
 
     # Show warning if tqdm is not available but progress bar was requested
     if not args.no_progress and not TQDM_AVAILABLE:
         print("# Warning: tqdm not installed. Install with 'pip install tqdm' for progress bar.", file=sys.stderr)
 
-    # If list-topics is requested, list topics and exit
-    if args.list_topics:
+    # If topics listing is requested, list topics and exit
+    if args.topics:
         list_topics(args.mcap, show_progress=not args.no_progress)
         sys.exit(0)
 
+    # If IDL definitions are requested, list them and exit
+    if args.idl:
+        list_idl_definitions(args.mcap, show_progress=not args.no_progress, specific_topics=args.topic_filter)
+        sys.exit(0)
+
     # Convert topics list to set for faster lookup if provided
-    topics_set = set(args.topics) if args.topics else None
+    topics_set = set(args.topics_filter) if args.topics_filter else None
 
     # Convert all log entries to JSON
     convert_mcap_to_json(args.mcap, args.json_file, show_progress=not args.no_progress, topics=topics_set, pretty=args.pretty)
