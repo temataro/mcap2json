@@ -1,0 +1,6 @@
+/data
+__pycache__
+*.csv
+*.csv.bz2
+*.json
+*.json.bz2

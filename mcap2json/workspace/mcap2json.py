@@ -29,6 +29,7 @@ import base64
 import bz2
 import os
 import glob
+import math
 from mcap import reader as mcap_reader
 from mcap_ros2.decoder import DecoderFactory
 from collections import defaultdict
@@ -405,6 +406,17 @@ def serialize_message(obj):
         return str(obj)
 
 
+def json_clean_nan(obj):
+    """Recursively replace NaN with None"""
+    if isinstance(obj, float) and math.isnan(obj):
+        return None
+    elif isinstance(obj, dict):
+        return {k: json_clean_nan(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [json_clean_nan(item) for item in obj]
+    return obj
+
+
 def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics=None, pretty=False, limit=None):
     """Read MCAP file and output each message as JSON object per line.
 
@@ -545,7 +557,7 @@ def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics
                                 json_obj["schema_encoding"] = schema.encoding
 
                     # Output JSON (pretty-printed or single line)
-                    print(json.dumps(json_obj, indent=2 if pretty else None), file=output)
+                    print(json.dumps(json_clean_nan(json_obj), indent=2 if pretty else None), file=output)
                     output_count += 1
 
                     # Check if we've reached the limit
