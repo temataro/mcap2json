@@ -26,43 +26,33 @@ The primary motivation for this tool is to **decouple data processing from the R
 - **IDL Inspection**: View IDL definitions for message types
 - **Output Limiting**: Sample large files by limiting the number of output messages
 
-### Build
 
+### Quick  Start with precompiled container
+
+**Note:** Docker and Podman commands are interchangeable. Simply replace `podman` with `docker` in any command below if using Docker. You can use      Docker command line tool if you don't have Podman installed - all the examples in this documentation will work identically with Docker, just substitute `docker` for `podman` and `docker-compose` for `podman-compose` in the commands.
+
+```bash
+# Run mcap2json in the current directory ($PWD) using the pre-compiled container and display help.
+podman run -it -v$PWD:/workspace --rm ghcr.io/meriac/mcap2json mcap2json -h
+
+# Run mcap2json in the current directory ($PWD) using the pre-compiled container.
+# Scan the directory `my_rosbags` for all mcap files and convert them into bzip2
+# compressed JSON files in the current directory.
+podman run -it -v$PWD:/workspace --rm ghcr.io/meriac/mcap2json mcap2json --mcap my_rosbags
+```
+
+### ByOC - Build Your Own Container
 This tool can be built and run using either Docker or Podman. **Podman is preferred** as it's:
 - Available license-free and open source
 - Daemonless architecture (more secure)
 - Rootless containers by default
 - Drop-in Docker replacement with compatible CLI
 
-**Note:** Docker and Podman commands are interchangeable. Simply replace `podman` with `docker` in any command below if using Docker.
-
-#### Building the Container
-
-```bash
-# Build using podman-compose (recommended)
-podman compose build --no-cache
-# --no-cache: Forces rebuild from scratch, ignoring cached layers
-# Reads compose.yml which defines the build context and image name
-```
-#### Build the Container
-
-```bash
-# Start interactive session
-podman compose run --rm mcap2json
-# compose run: Runs a one-off command in a service
-# --rm: Remove container after exit
-# mcap2json: Service name from compose.yml
-
-# Run with custom command
-podman compose run --rm mcap2json mcap2json -m input.mcap -t
-# Runs the mcap2json tool with -t flag to list topics
-```
-
 #### Running the Container
 
 ```bash
 # Interactive mode - opens bash shell in container
-podman run -it --rm -v $(pwd):/workspace mcap2json
+podman run -it --rm -v $(pwd):/workspace ghcr.io/meriac/mcap2json
 # -i: Keep STDIN open (interactive)
 # -t: Allocate pseudo-TTY (terminal)
 # --rm: Remove container after exit (cleanup)
@@ -70,12 +60,12 @@ podman run -it --rm -v $(pwd):/workspace mcap2json
 # mcap2json: Image name to run
 
 # Direct conversion example
-podman run --rm -v $(pwd):/workspace mcap2json \
+podman run --rm -v $(pwd):/workspace ghcr.io/meriac/mcap2json \
   mcap2json -m /workspace/input.mcap -o /workspace/output.json.bz2
 # Runs mcap2json command directly without entering bash
 
 # Process entire directory
-podman run --rm -v /path/to/mcap/files:/workspace mcap2json \
+podman run --rm -v /path/to/mcap/files:/workspace ghcr.io/meriac/mcap2json \
   mcap2json -m /workspace/
 # Processes all .mcap files recursively in the mounted directory
 ```
@@ -83,25 +73,31 @@ podman run --rm -v /path/to/mcap/files:/workspace mcap2json \
 ### Command-Line Options
 
 ```
-usage: mcap2json.py [-h] -m MCAP [-o JSON_FILE] [-q] [-p] [-t] [-i] [-l LIMIT] [topics_filter ...]
+usage: mcap2json [-h] -m MCAP [-o JSON_FILE] [-q] [-p] [-t] [-i] [-l LIMIT]
+                 [topics_filter ...]
 
 Convert ROS2 MCAP rosbag to JSON format (one object per line)
 
 positional arguments:
-  topics_filter         Topics to include in output (if not specified, all topics are included)
+  topics_filter         Topics to include in output (if not specified, all
+                        topics are included)
 
 options:
   -h, --help            show this help message and exit
-  -m MCAP, --mcap MCAP  Path to the MCAP file or directory containing MCAP files to convert
+  -m MCAP, --mcap MCAP  Path to the MCAP file or directory containing MCAP
+                        files to convert
   -o JSON_FILE, --output JSON_FILE
-                        Path to output JSON file (defaults to stdout if not specified). 
-                        If filename ends with .bz2, output will be compressed with bzip2.
-                        When processing a directory, this option is ignored and files
-                        are saved as basename.json.bz2
+                        Path to output JSON file (defaults to stdout if not
+                        specified). If filename ends with .bz2, output will be
+                        compressed with bzip2. When processing a directory,
+                        this option is ignored and files are saved as
+                        basename.json.bz2
   -q, --no-progress     Disable progress bar (quiet mode)
   -p, --pretty          Pretty-print JSON output (indented format)
-  -t, --topics          List all topics with their types and message counts, then exit
-  -i, --idl             List IDL definitions of all types contained (or specific topics if provided)
+  -t, --topics          List all topics with their types and message counts,
+                        then exit
+  -i, --idl             List IDL definitions of all types contained (or
+                        specific topics with subdependencies if provided)
   -l LIMIT, --limit LIMIT
                         Limit output to N JSON objects
 ```
@@ -127,7 +123,7 @@ graph LR
     C --> F[Visualization]
     C --> G[Long-term Archive]
     
-    classDef default stroke:#333,stroke-width:2px,color:#000
+    classDef default stroke:#888,stroke-width:2px,color:#444
     
     style A fill:#f9f
     style B fill:#bbf
@@ -367,6 +363,30 @@ bzcat output.json.bz2 | jq -r '[.timestamp, .topic] | @csv'
 
 # Filter messages by timestamp range
 bzcat output.json.bz2 | jq 'select(.timestamp > 1234567890000000000 and .timestamp < 1234567900000000000)'
+```
+
+## Roll Your Own
+
+### Building the Container
+
+```bash
+# Build using podman-compose (recommended)
+podman compose build --no-cache
+# --no-cache: Forces rebuild from scratch, ignoring cached layers
+# Reads compose.yml which defines the build context and image name
+```
+### Build the Container
+
+```bash
+# Start interactive session
+podman compose run --rm mcap2json
+# compose run: Runs a one-off command in a service
+# --rm: Remove container after exit
+# mcap2json: Service name from compose.yml
+
+# Run with custom command
+podman compose run --rm mcap2json mcap2json -m input.mcap -t
+# Runs the mcap2json tool with -t flag to list topics
 ```
 
 ## License
