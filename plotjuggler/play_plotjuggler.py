@@ -127,8 +127,11 @@ def process_json_to_udp(input_file: str, ipdest: Optional[str] = None) -> None:
                 try:
                     # Parse JSON object
                     json_obj = json.loads(line)
-                    json_obj['timestamp'] /= 1e9
-                    json_obj['data'] = nested_obj_from_path(json_obj['topic'],json_obj['data'])
+
+                    # Check whether its ROS or raw JSON
+                    if all(key in json_obj for key in ['timestamp','data']):
+                        json_obj['timestamp'] /= 1e9
+                        json_obj['data'] = nested_obj_from_path(json_obj['topic'],json_obj['data'])
                     
                     # Send via UDP or print to stdout
                     if sock and udp_dest:
