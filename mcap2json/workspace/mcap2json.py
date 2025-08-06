@@ -28,8 +28,8 @@ import sys
 import base64
 import bz2
 import os
-import glob
 import math
+from pathlib import Path
 from mcap import reader as mcap_reader
 from mcap_ros2.decoder import DecoderFactory
 from collections import defaultdict
@@ -57,6 +57,15 @@ CDR_TYPE_DECODERS = {
     "boolean": {"format": "?", "size": 1, "align": 1},
 }
 
+def open_compressed_file(filepath, mode='rt'):
+    """Open a file with automatic bz2 compression/decompression if needed.
+
+    Args:
+        filepath: Path to the file
+        mode: 'r' for reading, 'w' for writing
+    """
+    openfn = bz2.open if filepath.endswith('.bz2') else open
+    return openfn(filepath, mode)
 
 def parse_idl_type(idl_text, type_name):
     """Parse IDL to extract field information for a message type."""
@@ -435,17 +444,10 @@ def convert_mcap_to_json(mcap_file, output_file=None, show_progress=True, topics
         output_count = 0
 
         # Open output file if specified, otherwise use stdout
-        if output_file:
-            if output_file.endswith('.bz2'):
-                # Use bzip2 compression with highest compression level (9)
-                output = bz2.open(output_file, 'wt', compresslevel=9)
-            else:
-                output = open(output_file, 'w')
-        else:
-            output = sys.stdout
+        output = open_compressed_file(output_file, 'wt') if output_file else sys.stdout
 
         try:
-            with open(mcap_file, "rb") as f:
+            with open(mcap_file, 'rb') as f:
                 # Create decoder factory
                 decoder_factory = DecoderFactory()
 
@@ -593,30 +595,26 @@ def process_directory(directory_path, args):
         args: Command line arguments
     """
     # Find all MCAP files in the directory recursively
-    mcap_files = glob.glob(os.path.join(directory_path, '**', '*.mcap'), recursive=True)
-
+    mcap_files = [f for f in Path(directory_path).rglob('*.mcap') if f.is_file()]
     if not mcap_files:
         print(f"Error: No MCAP files found in directory '{directory_path}' (searched recursively)", file=sys.stderr)
         sys.exit(1)
 
-    print(f"# Found {len(mcap_files)} MCAP files in directory (recursive search)", file=sys.stderr)
+    mcap_file_count = len(mcap_files)
+    print(f"# Found {mcap_file_count} MCAP files in directory (recursive search)", file=sys.stderr)
 
     # Process each MCAP file
-    for i, mcap_file in enumerate(sorted(mcap_files), 1):
-        # Generate output filename: basename.json.bz2 in current directory
-        basename = os.path.basename(mcap_file)
-        output_file = os.path.splitext(basename)[0] + '.json.bz2'
+    for i, mcap_file in enumerate(sorted(mcap_files, key=lambda p: p.name), 1):
 
-        # Show relative path for better context in recursive mode
-        rel_path = os.path.relpath(mcap_file, directory_path)
+        output_file = mcap_file.stem + '.json.bz2'
 
-        print(f"\n# [{i}/{len(mcap_files)}] Processing: {rel_path} -> {output_file}", file=sys.stderr)
+        print(f"\n# [{i}/{mcap_file_count}] Processing: {mcap_file.name} -> {output_file}", file=sys.stderr)
 
         # Convert topics list to set for faster lookup if provided
         topics_set = set(args.topics_filter) if args.topics_filter else None
 
         # Convert the file
-        convert_mcap_to_json(mcap_file, output_file, show_progress=not args.no_progress,
+        convert_mcap_to_json(str(mcap_file), output_file, show_progress=not args.no_progress,
                             topics=topics_set, pretty=args.pretty, limit=args.limit)
 
     print(f"\n# Completed processing {len(mcap_files)} files", file=sys.stderr)
