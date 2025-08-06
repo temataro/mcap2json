@@ -12,7 +12,7 @@ endif
 CONTAINER:=$(CONTAINER_PREFIX):$(CONTAINER_ARCH)
 CONTAINER_PLATFORM:=linux/$(CONTAINER_ARCH)
 
-.PHONY: build rebuild run login publish manifest status version clean
+.PHONY: build rebuild test run login publish manifest status version clean
 
 build:
 	@echo "Building container '$(CONTAINER)'..."
@@ -22,8 +22,11 @@ rebuild:
 	@echo "Rebuilding container '$(CONTAINER)'..."
 	CONTAINER=$(CONTAINER) podman compose build --no-cache
 
+test: build
+	podman compose run --rm $(CONTAINER_NAME)
+
 run:
-	podman compose run --rm $(CONTAINER)
+	podman run --name $(CONTAINER_NAME) --hostname $(CONTAINER_NAME) -it -v$(PWD)/workspace:/workspace --rm $(CONTAINER)
 
 login:
 	@echo $(CR_PAT) | podman login $(CONTAINER_REGISTRY) -u DOESNT_MATTER --password-stdin
