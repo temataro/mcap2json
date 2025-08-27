@@ -2,7 +2,7 @@
 
 ################################################################################
 #                                                                              #
-#  JSON to UDP Packet Sender for ROS2-bags                                     #
+#  JSON to WebSocket Sender for ROS2-bags                                      #
 #                                                                              #
 #  Copyright (c) 2024 Milosch Meriac <milosch@meriac.com>                      #
 #                                                                              #
@@ -29,39 +29,37 @@ import base64
 import bz2
 import os
 import glob
-import socket
-from typing import Optional, Tuple
-from pprint import pprint
+import asyncio
+import websockets
+from websockets.exceptions import WebSocketException
+from typing import Optional
+from urllib.parse import urlparse
 
-def parse_ip_port(ipdest: str) -> Tuple[str, int]:
+def validate_websocket_url(ws_url: str) -> str:
     """
-    Parse IP address and port from string format 'IP:PORT'.
-    
+    Validate and normalize WebSocket URL.
+
     Args:
-        ipdest: IP destination in format 'IP:PORT'
-        
+        ws_url: WebSocket URL (e.g., 'ws://localhost:9871' or 'wss://example.com/path')
+
     Returns:
-        Tuple of (ip_address, port)
+        Validated WebSocket URL
     """
+    # Add default ws:// scheme if not present
+    if not ws_url.startswith(('ws://', 'wss://')):
+        ws_url = f'ws://{ws_url}'
+
     try:
-        if ':' in ipdest:
-            ip, port_str = ipdest.rsplit(':', 1)
-            port = int(port_str)
-        else:
-            # Default port if not specified
-            ip = ipdest
-            port = 8080
-            
-        # Basic IP validation
-        socket.inet_aton(ip)
-        
-        if not 1 <= port <= 65535:
-            raise ValueError(f"Port {port} is out of valid range (1-65535)")
-            
-        return ip, port
-    except (ValueError, socket.error) as e:
-        print(f"Error: Invalid IP address or port format: {ipdest}", file=sys.stderr)
-        print(f"Expected format: 'IP:PORT' (e.g., '127.0.0.1:8080')", file=sys.stderr)
+        parsed = urlparse(ws_url)
+        if parsed.scheme not in ['ws', 'wss']:
+            raise ValueError(f"Invalid WebSocket scheme: {parsed.scheme}")
+        if not parsed.netloc:
+            raise ValueError("Missing host in WebSocket URL")
+        return ws_url
+    except Exception as e:
+        print(f"Error: Invalid WebSocket URL format: {ws_url}", file=sys.stderr)
+        print(f"Expected format: 'ws://host:port/path' or 'wss://host:port/path'", file=sys.stderr)
+        print(f"Error details: {e}", file=sys.stderr)
         sys.exit(1)
 
 def nested_obj_from_path(path, obj):
@@ -85,39 +83,36 @@ def nested_obj_from_path(path, obj):
 
     return result
 
-def process_json_to_udp(input_file: str, ipdest: Optional[str] = None) -> None:
+async def process_json_to_websocket(input_file: str, ws_url: Optional[str] = None) -> None:
     """
-    Process JSON file line by line and send each as UDP packet.
+    Process JSON file line by line and send each message via WebSocket.
 
     Args:
         input_file: Path to input JSON file (can be .bz2 compressed)
-        ipdest: IP destination in format 'IP:PORT' for UDP output
+        ws_url: WebSocket URL for output (e.g., 'ws://localhost:8080')
     """
-    # Setup UDP socket if IP destination provided
-    sock = None
-    udp_dest = None
-    
-    if ipdest:
-        ip, port = parse_ip_port(ipdest)
-        udp_dest = (ip, port)
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            print(f"Sending UDP packets to {ip}:{port}", file=sys.stderr)
-        except socket.error as e:
-            print(f"Error creating UDP socket: {e}", file=sys.stderr)
-            sys.exit(1)
+    websocket_conn = None
+    packets_sent = 0
+    line_number = 0
 
     try:
+        # Connect to WebSocket if URL provided
+        if ws_url:
+            ws_url = validate_websocket_url(ws_url)
+            try:
+                websocket_conn = await websockets.connect(ws_url)
+                print(f"Connected to WebSocket at {ws_url}", file=sys.stderr)
+            except Exception as e:
+                print(f"Error connecting to WebSocket: {e}", file=sys.stderr)
+                sys.exit(1)
+
         # Open input file with bz2 compression if needed
         if input_file.endswith('.bz2'):
             f = bz2.open(input_file, 'rt', encoding='utf-8')
         else:
             f = open(input_file, 'r', encoding='utf-8')
-        
+
         with f:
-            line_number = 0
-            packets_sent = 0
-            
             for line in f:
                 line_number += 1
                 line = line.strip()
@@ -132,19 +127,22 @@ def process_json_to_udp(input_file: str, ipdest: Optional[str] = None) -> None:
                     if all(key in json_obj for key in ['timestamp','data']):
                         json_obj['timestamp'] /= 1e9
                         json_obj['data'] = nested_obj_from_path(json_obj['topic'],json_obj['data'])
-                    
-                    # Send via UDP or print to stdout
-                    if sock and udp_dest:
+
+                    # Send via WebSocket or print to stdout
+                    if websocket_conn:
                         # Convert back to compact JSON for transmission
-                        sock.sendto(json.dumps(json_obj).encode('utf-8'), udp_dest)
+                        await websocket_conn.send(json.dumps(json_obj))
                         packets_sent += 1
+                    else:
+                        # Print to stdout if no WebSocket connection
+                        print(json.dumps(json_obj))
 
                 except json.JSONDecodeError as e:
                     print(f"Error parsing JSON on line {line_number}: {e}", file=sys.stderr)
                     print(f"Content: {line[:100]}...", file=sys.stderr)
                     continue
-                except socket.error as e:
-                    print(f"Error sending UDP packet on line {line_number}: {e}", file=sys.stderr)
+                except websockets.exceptions.WebSocketException as e:
+                    print(f"Error sending WebSocket message on line {line_number}: {e}", file=sys.stderr)
                     continue
                 except Exception as e:
                     print(f"Unexpected error on line {line_number}: {e}", file=sys.stderr)
@@ -157,35 +155,34 @@ def process_json_to_udp(input_file: str, ipdest: Optional[str] = None) -> None:
         print(f"Error reading input file: {e}", file=sys.stderr)
         sys.exit(1)
     finally:
-        if sock:
-            sock.close()
-    
-    if ipdest and packets_sent > 0:
-        print(f"\nTotal UDP packets sent: {packets_sent}", file=sys.stderr)
+        if websocket_conn:
+            await websocket_conn.close()
+
+    if ws_url and packets_sent > 0:
+        print(f"\nTotal WebSocket messages sent: {packets_sent}", file=sys.stderr)
     elif line_number == 0:
         print("Warning: No valid JSON objects found in input file.", file=sys.stderr)
 
 
 def main() -> None:
-    """Main entry point for the JSON to UDP packet sender."""
+    """Main entry point for the JSON to WebSocket sender."""
     parser = argparse.ArgumentParser(
-        description='Send JSON objects (one per line) as UDP packets',
+        description='Send JSON objects (one per line) via WebSocket',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
     # Add command line arguments
-    parser.add_argument('-v', '--view', metavar='LOGFILE', type=str, required=True, 
+    parser.add_argument('-v', '--view', metavar='LOGFILE', type=str, required=True,
                         help='Input JSON log file to view (mandatory, supports .bz2)')
-    parser.add_argument('-i', '--ipdest', type=str, required=False, default='127.0.0.1:9870', 
-                        help='Output JSON over UDP network instead of stdout. '
-                             'Send UDP packets to the specified <IPDEST>. '
-                             'Specify the port with a \':\' and a number following '
-                             'the IP address (example: \'127.0.0.1:8080\').')
+    parser.add_argument('-w', '--websocket', type=str, required=False, default='ws://localhost:9871',
+                        help='WebSocket URL for sending JSON messages. '
+                             'Format: ws://host:port/path or wss://host:port/path '
+                             '(example: \'ws://localhost:9871\' or \'wss://example.com/data\')')
 
     args = parser.parse_args()
 
-    # Process the JSON to UDP
-    process_json_to_udp(args.view, args.ipdest)
+    # Run the async function
+    asyncio.run(process_json_to_websocket(args.view, args.websocket))
 
 
 if __name__ == '__main__':
