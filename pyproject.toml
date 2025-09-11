@@ -10,4 +10,8 @@ dependencies = [
     "tqdm>=4.67.1",
 ]
 [tool.setuptools]
-packages = ["mcap2json", "plotjuggler"]
+packages = ["src/mcap2json", "src/play_plotjuggler"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mcap2json", "play_plotjuggler"]
